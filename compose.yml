@@ -1,0 +1,111 @@
+services:
+  minio:
+    image: minio/minio
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    networks:
+      - data-network
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./minio/data:/data
+    command: server /data --console-address :9001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      
+  createbuckets:
+    image: minio/mc
+    container_name: createbuckets
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until (mc alias set local http://minio:9000 minioadmin minioadmin123); 
+        do echo 'Waiting for MinIO...'; 
+        sleep 3; 
+      done;
+      mc mb local/dhilocal;
+      mc anonymous set public local/dhilocal;
+      mc cp /init/series.csv local/dhilocal/store/series/series.csv;
+      "
+    networks:
+      - data-network
+    volumes:
+      - ./minio/init:/init
+  
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    hostname: postgres
+    environment:
+      POSTGRES_DB: hive_metastore
+      POSTGRES_USER: hiveuser
+      POSTGRES_PASSWORD: hivepassword
+    networks:
+      - data-network
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hiveuser -d hive_metastore"]
+      interval: 2s
+      timeout: 2s
+      retries: 3
+
+  hive:
+    build: ./hive
+    container_name: hive
+    hostname: hive
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - data-network
+    ports:
+      - "9083:9083"
+    volumes:
+      - ./hive/conf:/opt/hive/conf
+      - ./hive/lib/postgresql-42.7.4.jar:/opt/hive/lib/postgresql-42.7.4.jar
+      - ./hive/lib/aws-java-sdk-bundle-1.11.375.jar:/opt/hive/lib/aws-java-sdk-bundle-1.11.375.jar
+      - ./hive/lib/hadoop-aws-3.3.0.jar:/opt/hive/lib/hadoop-aws-3.3.0.jar
+    environment:
+      DB_DRIVER: postgres
+      HIVE_CUSTOM_CONF_DIR: /opt/hive/conf
+      HIVE_METASTORE_URIS: thrift://hive:9083
+      SERVICE_NAME: metastore
+    healthcheck:
+      test: ["CMD", "nc", "-z", "hive", "9083"]
+      interval: 2s
+      timeout: 2s
+      retries: 3
+  
+  trino:
+    build: ./trino
+    container_name: trino
+    hostname: trino
+    depends_on:
+      - postgres
+      - hive
+    volumes:
+      - ./trino/config:/etc/trino
+    networks:
+      - data-network
+    ports:
+      - "8080:8080"
+    environment:
+      AWS_JAVA_V1_DISABLE_DEPRECATION_ANNOUNCEMENT: true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/status"]
+      interval: 2s
+      timeout: 2s
+      retries: 3
+
+networks:
+  data-network:
