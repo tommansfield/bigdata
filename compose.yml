@@ -81,7 +81,7 @@ services:
       HIVE_METASTORE_URIS: thrift://hive:9083
       SERVICE_NAME: metastore
     healthcheck:
-      test: ["CMD", "nc", "-z", "hive", "9083"]
+      test: ["CMD", "curl", "-f", "http://localhost:9083/"]
       interval: 2s
       timeout: 2s
       retries: 3

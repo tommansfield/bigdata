@@ -1,4 +1,2 @@
 minio/data/**
-hive/lib/**
 postgres/data/**
-trino/lib/**
